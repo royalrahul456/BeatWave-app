@@ -1,0 +1,236 @@
+/*
+ * ArchiveTune (2026)
+ * © Rukamori — github.com/rukamori
+ * GPL-3.0 License | Contributors: see git history
+ * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
+ */
+
+package moe.rukamori.archivetune.viewmodels
+
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.google.common.collect.ImmutableList
+import dagger.hilt.android.lifecycle.HiltViewModel
+import java.text.NumberFormat
+import javax.inject.Inject
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.launch
+import moe.rukamori.archivetune.R
+import moe.rukamori.archivetune.mediainfo.MediaInfoData
+import moe.rukamori.archivetune.mediainfo.MediaInfoDetail
+import moe.rukamori.archivetune.mediainfo.MediaInfoEvent
+import moe.rukamori.archivetune.mediainfo.MediaInfoModuleDetails
+import moe.rukamori.archivetune.mediainfo.MediaInfoNumbers
+import moe.rukamori.archivetune.mediainfo.MediaInfoQuickFact
+import moe.rukamori.archivetune.mediainfo.MediaInfoState
+import moe.rukamori.archivetune.mediainfo.MediaInfoTab
+import moe.rukamori.archivetune.mediainfo.MediaInfoUiModel
+import moe.rukamori.archivetune.mediainfo.ObserveMediaInfoUseCase
+import moe.rukamori.archivetune.mediainfo.asMediaInfoError
+import moe.rukamori.archivetune.modules.ModuleTrackDetails
+import moe.rukamori.archivetune.modules.displayLabel
+import moe.rukamori.archivetune.ui.utils.formatFileSize
+import moe.rukamori.archivetune.ui.utils.numberFormatter
+
+@HiltViewModel
+class MediaInfoViewModel @Inject constructor(
+    private val observeMediaInfo: ObserveMediaInfoUseCase,
+    private val savedStateHandle: SavedStateHandle,
+) : ViewModel() {
+    private val mutableState = MutableStateFlow<MediaInfoState<MediaInfoUiModel>>(MediaInfoState.Loading)
+    val state = mutableState.asStateFlow()
+    private val mutableTab = MutableStateFlow(
+        MediaInfoTab.entries.firstOrNull { it.name == savedStateHandle.get<String>(TabKey) }
+            ?: MediaInfoTab.Information,
+    )
+    val selectedTab = mutableTab.asStateFlow()
+    private val eventChannel = Channel<MediaInfoEvent>(Channel.BUFFERED)
+    val events = eventChannel.receiveAsFlow()
+    private var loadJob: Job? = null
+    private var currentVideoId: String? = null
+    private var currentVolume: Float? = null
+
+    fun open(videoId: String, volume: Float?) {
+        if (currentVideoId == videoId && loadJob?.isActive == true) return
+        loadJob?.cancel()
+        currentVideoId = videoId
+        currentVolume = volume
+        if (savedStateHandle.get<String>(VideoIdKey) != videoId) {
+            savedStateHandle[VideoIdKey] = videoId
+            selectTab(MediaInfoTab.Information)
+        }
+        mutableState.value = MediaInfoState.Loading
+        if (videoId.isBlank()) {
+            mutableState.value = MediaInfoState.Empty
+            return
+        }
+        loadJob = viewModelScope.launch {
+            observeMediaInfo(videoId)
+                .map<MediaInfoData, MediaInfoState<MediaInfoUiModel>> { data ->
+                    MediaInfoState.Success(mapData(videoId, volume, data))
+                }
+                .catch { failure -> emit(failure.asMediaInfoError()) }
+                .collect { mutableState.value = it }
+        }
+    }
+
+    fun release(videoId: String) {
+        if (currentVideoId != videoId) return
+        loadJob?.cancel()
+        loadJob = null
+        currentVideoId = null
+        currentVolume = null
+        mutableState.value = MediaInfoState.Loading
+    }
+
+    fun retry() {
+        val videoId = currentVideoId ?: return
+        loadJob?.cancel()
+        loadJob = null
+        open(videoId, currentVolume)
+    }
+
+    fun selectTab(tab: MediaInfoTab) {
+        mutableTab.value = tab
+        savedStateHandle[TabKey] = tab.name
+    }
+
+    fun copy(value: String) {
+        eventChannel.trySend(MediaInfoEvent.Copy(value))
+    }
+
+    fun copyId() {
+        currentVideoId?.let(::copy)
+    }
+
+    fun share() {
+        currentVideoId?.let { eventChannel.trySend(MediaInfoEvent.Share("https://music.youtube.com/watch?v=$it")) }
+    }
+
+    fun close() {
+        eventChannel.trySend(MediaInfoEvent.Close)
+    }
+
+    private fun mapData(videoId: String, volume: Float?, data: MediaInfoData): MediaInfoUiModel {
+        val local = (data.local as? MediaInfoState.Success)?.data
+        val metadata = (data.metadata as? MediaInfoState.Success)?.data
+        val statistics = (data.statistics as? MediaInfoState.Success)?.data
+        val format = local?.format
+        val title = local?.title ?: metadata?.title ?: videoId
+        val artists = local?.artists ?: metadata?.author
+        val fileSize = format?.contentLength?.takeIf { it > 0 }?.let(::formatFileSize)
+        val bitrate = format?.bitrate?.takeIf { it > 0 }?.let { "${it / 1000} kbps" }
+        val technical = buildList {
+            format?.let {
+                add(MediaInfoDetail(R.string.media_info_itag, it.itag.toString()))
+                it.mimeType.takeIf(String::isNotBlank)?.let { value -> add(MediaInfoDetail(R.string.mime_type, value)) }
+                it.codecs.takeIf(String::isNotBlank)?.let { value -> add(MediaInfoDetail(R.string.codecs, value)) }
+                bitrate?.let { value -> add(MediaInfoDetail(R.string.bitrate, value)) }
+                it.sampleRate?.takeIf { value -> value > 0 }?.let { value -> add(MediaInfoDetail(R.string.sample_rate, "$value Hz")) }
+                it.loudnessDb?.let { value -> add(MediaInfoDetail(R.string.loudness, "$value dB")) }
+                fileSize?.let { value -> add(MediaInfoDetail(R.string.file_size, value)) }
+            }
+            volume?.let { add(MediaInfoDetail(R.string.volume, "${(it * 100).toInt()}%")) }
+        }
+        val technicalState: MediaInfoState<ImmutableList<MediaInfoDetail>> = when {
+            data.local is MediaInfoState.Error -> data.local
+            technical.isEmpty() -> MediaInfoState.Empty
+            else -> MediaInfoState.Success(ImmutableList.copyOf(technical))
+        }
+        val facts = buildList {
+            format?.mimeType?.substringBefore(';')?.takeIf(String::isNotBlank)?.let {
+                add(MediaInfoQuickFact(R.drawable.graphic_eq, it))
+            }
+            bitrate?.let { add(MediaInfoQuickFact(R.drawable.waves, it)) }
+            format?.sampleRate?.takeIf { it > 0 }?.let { add(MediaInfoQuickFact(R.drawable.speed, "$it Hz")) }
+            fileSize?.let { add(MediaInfoQuickFact(R.drawable.storage, it)) }
+        }
+        return MediaInfoUiModel(
+            videoId = videoId,
+            title = title,
+            subtitle = artists,
+            artwork = local?.artwork ?: metadata?.artwork,
+            metadata = data.metadata,
+            descriptionState = when (data.metadata) {
+                is MediaInfoState.Success -> metadata?.description?.let { MediaInfoState.Success(it) } ?: MediaInfoState.Empty
+                MediaInfoState.Loading -> MediaInfoState.Loading
+                MediaInfoState.Empty -> MediaInfoState.Empty
+                is MediaInfoState.Error -> data.metadata
+            },
+            technicalDetails = technicalState,
+            moduleDetails = when (val module = data.module) {
+                is MediaInfoState.Success -> MediaInfoState.Success(
+                    MediaInfoModuleDetails(module.data.module.displayLabel, ImmutableList.copyOf(moduleDetails(module.data.details))),
+                )
+                MediaInfoState.Loading -> MediaInfoState.Loading
+                MediaInfoState.Empty -> MediaInfoState.Empty
+                is MediaInfoState.Error -> module
+            },
+            statistics = data.statistics,
+            overview = ImmutableList.of(
+                MediaInfoDetail(R.string.song_title, local?.title ?: metadata?.title),
+                MediaInfoDetail(R.string.song_artists, artists),
+                MediaInfoDetail(R.string.media_id, videoId),
+            ),
+            quickFacts = ImmutableList.copyOf(facts),
+            numbers = MediaInfoNumbers(
+                views = statistics?.views?.let(::numberFormatter),
+                likes = statistics?.likes?.let(::numberFormatter),
+                dislikes = statistics?.dislikes?.let(::numberFormatter),
+                subscribers = metadata?.subscribers?.takeIf(String::isNotBlank),
+                likeRatio = likeRatio(statistics?.likes, statistics?.dislikes),
+            ),
+        )
+    }
+
+    private fun moduleDetails(details: ModuleTrackDetails): List<MediaInfoDetail> = buildList {
+        fun text(labelRes: Int, value: String?) {
+            value?.let { add(MediaInfoDetail(labelRes, it)) }
+        }
+        fun list(labelRes: Int, values: List<String>) {
+            values.takeIf { it.isNotEmpty() }?.let { add(MediaInfoDetail(labelRes, it.joinToString())) }
+        }
+        text(R.string.song_title, details.title)
+        list(R.string.song_artists, details.artists)
+        text(R.string.modules_field_album, details.album)
+        text(R.string.modules_field_album_artist, details.albumArtist)
+        text(R.string.modules_field_release_date, details.releaseDate)
+        list(R.string.modules_field_genres, details.genres)
+        text(R.string.modules_field_label, details.label)
+        list(R.string.modules_field_composers, details.composers)
+        list(R.string.modules_field_lyricists, details.lyricists)
+        list(R.string.modules_field_producers, details.producers)
+        details.bpm?.let {
+            add(MediaInfoDetail(R.string.modules_field_bpm, NumberFormat.getNumberInstance().apply { maximumFractionDigits = 1 }.format(it)))
+        }
+        text(R.string.modules_field_key, details.key)
+        text(R.string.modules_field_language, details.language)
+        details.explicit?.let {
+            add(MediaInfoDetail(R.string.modules_field_content_rating, null, if (it) R.string.modules_field_explicit else R.string.modules_field_clean))
+        }
+        text(R.string.modules_field_isrc, details.isrc)
+        text(R.string.modules_field_upc, details.upc)
+        text(R.string.modules_field_copyright, details.copyright)
+        text(R.string.description, details.description)
+        text(R.string.modules_field_artwork, details.artworkUrl)
+        text(R.string.modules_field_link, details.url)
+    }
+
+    private fun likeRatio(likes: Int?, dislikes: Int?): Float? {
+        if (likes == null || dislikes == null || likes < 0 || dislikes < 0) return null
+        val total = likes.toLong() + dislikes.toLong()
+        return if (total > 0) (likes.toDouble() / total).toFloat() else null
+    }
+
+    private companion object {
+        const val TabKey = "mediaInfoTab"
+        const val VideoIdKey = "mediaInfoVideoId"
+    }
+}
