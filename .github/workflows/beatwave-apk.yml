@@ -11,6 +11,14 @@ on:
         options:
           - release
           - debug
+      abi:
+        description: 'Target ABI'
+        required: true
+        default: 'arm64'
+        type: choice
+        options:
+          - arm64
+          - universal
   push:
     branches: [ 'main', 'master' ]
     paths-ignore:
@@ -56,6 +64,7 @@ jobs:
         shell: bash
         env:
           BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
+          ABI: ${{ github.event.inputs.abi || 'arm64' }}
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
           API_BEARER_TOKEN: ${{ secrets.API_BEARER_TOKEN }}
@@ -64,11 +73,13 @@ jobs:
           EXTRACTOR_BEARER: ${{ secrets.EXTRACTOR_BEARER }}
         run: |
           set -euo pipefail
-          if [ "$BUILD_TYPE" = "debug" ]; then
-            ./gradlew assembleGmsMobileUniversalDebug assembleGmsMobileArm64Debug
-          else
-            ./gradlew assembleGmsMobileUniversalRelease assembleGmsMobileArm64Release
-          fi
+          ABI_CAP="$(tr '[:lower:]' '[:upper:]' <<< "${ABI:0:1}")${ABI:1}"
+          BUILD_CAP="$(tr '[:lower:]' '[:upper:]' <<< "${BUILD_TYPE:0:1}")${BUILD_TYPE:1}"
+          TASK="assembleGmsMobile${ABI_CAP}${BUILD_CAP}"
+          echo "Running Gradle task: $TASK"
+          ./gradlew "$TASK" \
+            --max-workers=2 \
+            -Dkotlin.daemon.jvmargs="-Xmx5120m -Djava.awt.headless=true -XX:+UseG1GC"
 
       - name: Sign and collect APKs
         shell: bash
