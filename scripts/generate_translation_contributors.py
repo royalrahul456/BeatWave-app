@@ -51,7 +51,13 @@ def main() -> None:
                 names.append(author)
 
     if not contributors:
-        raise RuntimeError("No translation credits found in Git history")
+        if OUTPUT.is_file():
+            print("No translation credits found in Git history; keeping existing translation_contributors.json")
+            return
+        OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+        OUTPUT.write_text("[]\n", encoding="utf-8")
+        print("No translation credits found in Git history; wrote empty translation_contributors.json")
+        return
     data = [
         {"qualifier": language, "contributors": contributors[language]}
         for language in sorted(contributors)
