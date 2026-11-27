@@ -82,11 +82,11 @@ data class LyricsGlassStyle(
         val VividGlow =
             LyricsGlassStyle(
                 labelRes = R.string.lyrics_share_style_vivid_glow,
-                surfaceTint = Color(0xFFFF6B9D),
+                surfaceTint = Color(0xFF00BFFF),
                 surfaceAlpha = 0.2f,
                 textColor = Color.White,
                 secondaryTextColor = Color.White.copy(alpha = 0.8f),
-                overlayColor = Color(0xFFFF6B9D),
+                overlayColor = Color(0xFF00BFFF),
                 overlayAlpha = 0.12f,
                 isDark = true,
                 backgroundDimAlpha = 0.25f,

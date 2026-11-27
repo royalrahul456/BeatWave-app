@@ -70,13 +70,13 @@ fun FloatingBarGlassBackground(
         GlassStyle.clear.then {
             shape(shape)
             backgroundColor(surfaceColor)
-            tint(surfaceColor.copy(alpha = if (isDarkSurface) 0.2f else 0.16f))
-            whitePoint(if (isDarkSurface) -0.08f else 0.08f)
-            contrast(0f)
-            chromaMultiplier(1f)
-            specularIntensity(0.32f)
-            edgeShadow(Color.Black.copy(alpha = 0.06f))
-            ambientResponse(0.12f)
+            tint(surfaceColor.copy(alpha = if (isDarkSurface) 0.12f else 0.10f))
+            whitePoint(if (isDarkSurface) -0.04f else 0.12f)
+            contrast(0.04f)
+            chromaMultiplier(1.3f)
+            specularIntensity(0.52f)
+            edgeShadow(Color.Black.copy(alpha = 0.10f))
+            ambientResponse(0.18f)
         }
     }
     Box(
@@ -101,11 +101,11 @@ private fun FrostedGlassBackground(
     val blurStyle = remember(surfaceColor, isDarkSurface) {
         HazeBlurStyle {
             backgroundColor(surfaceColor)
-            blurRadius(20.dp)
+            blurRadius(28.dp)
             noiseFactor(0f)
             colorEffects(
                 listOf(
-                    HazeColorEffect.tint(surfaceColor.copy(alpha = if (isDarkSurface) 0.42f else 0.36f)),
+                    HazeColorEffect.tint(surfaceColor.copy(alpha = if (isDarkSurface) 0.30f else 0.25f)),
                 ),
             )
             fallbackColorEffect(HazeColorEffect.tint(surfaceColor))
@@ -114,9 +114,9 @@ private fun FrostedGlassBackground(
     val rimBrush = remember(isDarkSurface) {
         Brush.linearGradient(
             colors = listOf(
-                Color.White.copy(alpha = if (isDarkSurface) 0.22f else 0.5f),
-                Color.White.copy(alpha = 0.04f),
-                Color.White.copy(alpha = if (isDarkSurface) 0.1f else 0.24f),
+                Color.White.copy(alpha = if (isDarkSurface) 0.30f else 0.55f),
+                Color.White.copy(alpha = 0.06f),
+                Color.White.copy(alpha = if (isDarkSurface) 0.16f else 0.30f),
             ),
         )
     }

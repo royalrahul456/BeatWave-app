@@ -993,7 +993,7 @@ class MainActivity : ComponentActivity() {
                     val floatingBarsHazeState = rememberHazeState()
                     val navigationBarBackgroundStyle by rememberEnumPreference(
                         key = NavigationBarBackgroundStyleKey,
-                        defaultValue = NavigationBarBackgroundStyle.THEME,
+                        defaultValue = NavigationBarBackgroundStyle.GLASS,
                     )
                     val navigationBarMode by rememberEnumPreference(
                         key = NavigationBarModeKey,
